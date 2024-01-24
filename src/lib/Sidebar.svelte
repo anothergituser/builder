@@ -79,13 +79,13 @@
 
 	async function get_primo_blocks() {
 		const { data } = await axios.get(
-			'https://raw.githubusercontent.com/mateomorris/primo-library/main/primo.json'
+			'https://raw.githubusercontent.com/anothergituser/primo-library/main/primo.json'
 		)
 		return data.symbols.map((s) => ({ ...s, _drag_id: uuidv4() }))
 	}
 
 	let draggable_symbols = $symbols.map((s) => ({ ...s, _drag_id: s.id }))
-	$: console.log({ draggable_symbols })
+	// $: console.log({ draggable_symbols })
 	$: refresh_symbols($symbols)
 
 	const flipDurationMs = 200

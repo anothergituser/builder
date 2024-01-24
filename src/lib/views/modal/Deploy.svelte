@@ -20,8 +20,11 @@
 	import { push_site, build_site_bundle } from './Deploy'
 	import PrimaryButton from '$lib/ui/PrimaryButton.svelte'
 	import { dataChanged } from '$lib/database'
+	import { PUBLIC_ENVIRONMENT } from '$env/static/public'
 
 	let stage = 'INITIAL'
+	let preview_tmp_path = '';
+	let download_all_assets = false;
 
 	if ($active_deployment) {
 		stage = 'CONNECT_REPO__ACTIVE'
@@ -30,12 +33,12 @@
 	let entered_github_token = ''
 
 	let github_account = $site.active_deployment?.repo?.owner
-	if (!github_account) {
-		axios
-			.get('/api/deploy/user')
-			.then(({ data }) => (github_account = data))
-			.catch((e) => console.log(e))
-	}
+	// if (!github_account) {
+	// 	axios
+	// 		.get('/api/deploy/user')
+	// 		.then(({ data }) => (github_account = data))
+	// 		.catch((e) => console.log(e))
+	// }
 
 	async function connect_github() {
 		const headers = { Authorization: `Bearer ${entered_github_token}` }
@@ -56,6 +59,21 @@
 		}
 	}
 
+	async function temp_site() {
+
+		loading = true
+		const files = await build_site_bundle({ pages: $pages, symbols: $symbols })
+		if (!files) {
+				loading = false
+				return
+		}
+
+		const { data } = await axios.post('/api/deploy/temp', {files: files, site_name: $site.name});
+		preview_tmp_path = data.path;
+		loading = false;
+
+	}
+
 	async function download_site() {
 		loading = true
 		const files = await build_site_bundle({ pages: $pages, symbols: $symbols })
@@ -69,14 +87,45 @@
 
 		async function create_site_zip(files) {
 			const zip = new JSZip()
+			let downloaded = [];
+			let rgx = /"https:\/\/[a-z]+\.supabase\.co\/storage\/v1\/object\/public\/images\/[a-zA-Z0-9_\/-]+\.(png|jpg|jpeg|ico)"/gm
 			files.forEach(({ path, content }) => {
+				if (download_all_assets && path.search(/index\.html/) !== -1) {
+					content = content.replace(rgx, (match) => {
+						let img_filename = match.split("/").slice(-1)[0].replace("\"", "");
+						if (downloaded.indexOf(img_filename) == -1) {
+							zip.file("_images/" + img_filename, download_image(match.replace(/"/gm, "")));
+							downloaded.push(img_filename);
+						}
+						return `"/_images/${img_filename}"`;
+					})
+				}
 				zip.file(path, content)
 			})
 			return await zip.generateAsync({ type: 'blob' })
 		}
 	}
 
-	$: console.log({ $active_deployment })
+	async function download_image(url) {
+		
+		let r = (blob) => {
+			return new Promise((resolve, reject) => {
+				const reader = new FileReader()
+				reader.onloadend = () => resolve(reader.result)
+				reader.onerror = reject
+				reader.readAsArrayBuffer(blob);
+			})
+		}
+		
+		let response = await fetch(url.trim());
+		let blob = await response.blob();
+		let bin = await r(blob);
+		
+		return bin;
+	
+	}
+
+	// $: console.log({ $active_deployment })
 
 	let new_repo_name = ''
 	let existing_repo_name = ''
@@ -153,6 +202,12 @@
 					<Icon icon={loading ? 'eos-icons:loading' : 'ic:baseline-download'} />
 					<span>Download</span>
 				</button>
+				{#if PUBLIC_ENVIRONMENT === "local_"}
+					<button class="primo-button" on:click={temp_site}>
+						<Icon icon={loading ? 'eos-icons:loading' : 'mdi:files'} />
+						<span>Preview</span>
+					</button>
+				{/if}
 				{#if github_account}
 					<button class="primo-button primary" on:click={() => (stage = 'CONNECT_REPO')}>
 						<Icon icon="mdi:github" />
@@ -165,6 +220,12 @@
 					</button>
 				{/if}
 			</div>
+			<div>
+				<input type="checkbox" bind:checked={download_all_assets} /> Download all assets
+			</div>
+			{#if preview_tmp_path != ''}
+				<div>Preview site using "python -m http.server 8000 -d {preview_tmp_path}"</div>
+			{/if}
 		</div>
 	{:else if stage === 'CONNECT_GITHUB'}
 		<div class="container">
